@@ -1,10 +1,13 @@
 use std::ops::{Add, Sub, Mul, Div};
+use std::fs;
+use std::io::Write;
 
 #[derive(Copy,Clone)]
 struct Conserved{
 	density: f64,
 	momentum_density: f64,
 }
+
 
 impl Add for Conserved {
 	type Output = Conserved;
@@ -98,9 +101,7 @@ fn hll_flux(ul: Conserved, ur: Conserved, gamma: f64) -> Conserved {
 	let alpha_plus  = (lambda_left_plus).max(lambda_right_plus).max(0.);
 	let alpha_minus = (-lambda_left_minus).max(-lambda_right_minus).max(0.);
 
-	((fl * alpha_plus) - (fr * alpha_minus) - (ul - ur) * alpha_plus * alpha_minus) / (alpha_plus - alpha_minus)
-
-
+	((fl * alpha_plus) + (fr * alpha_minus) - (ur - ul) * alpha_plus * alpha_minus) / (alpha_plus + alpha_minus)
 
 }
 
@@ -130,25 +131,47 @@ fn next(u: Vec<Conserved>, dx: f64, dt: f64, gamma: f64) -> Vec<Conserved> {
 
 
 
+fn shocktube(x: f64, x_split: f64, rho_left: f64, rho_right: f64) -> Conserved {
+	if x < x_split {
+		Conserved{
+			density: rho_left,
+			momentum_density: 0.
+		}
+	}
+	else {
+		Conserved{
+			density: rho_right,
+			momentum_density:0.
+		}
+	}
+}
+
+
+
 
 fn main() {
     let x_0 = -1.;
     let x_f = 1.;
-    let num_cells = 10;
+    let num_cells = 100;
     let dx = (x_f - x_0) / (num_cells as f64);
-    let tfinal = 0.25;
+    let tfinal = 0.5;
     let dt = tfinal / 100. ; 
     let gamma = 1.;
 
     let xc:Vec<_> = (0..num_cells).map(|i| x_0 + (i as f64 + x_f) * dx).collect();
-    let mut u: Vec<_> = xc.iter().map(|_| Conserved {density: 1., momentum_density: 0.}).collect();
+    let mut u: Vec<_> = xc.iter().map(|&x| shocktube(x, 0.0, 1.0, 0.1)).collect();
+    //let mut u: Vec<_> = xc.iter().map(|_| Conserved {density: 1., momentum_density: 0.5}).collect();
     let mut t = 0.0;
 
     while t < tfinal {
     	u = next(u, dx, dt, gamma);
     	t += dt ;
-    	println!("t = {:?}",t);
 
+    }
+
+    let file = fs::File::create("solution.dat").unwrap();
+    for (xc, u) in xc.iter().zip(u) {
+    	writeln!(&file, "{:.6} {:.6} {:.6}", xc, u.density, u.velocity()).unwrap();
     }
 
 }
