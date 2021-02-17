@@ -153,7 +153,7 @@ fn main() {
     let dt = tfinal / 100.0; 
     let gamma = 1.0;
 
-    let xc: Vec<_> = (0..num_cells).map(|i| x_0 + (i as f64 + x_f) * dx).collect();
+    let xc: Vec<_> = (0..num_cells).map(|i| x_0 + (i as f64 + 0.5) * dx).collect();
     let mut u: Vec<_> = xc.iter().map(|&x| shocktube(x, 0.0, 1.0, 0.1)).collect();
     //let mut u: Vec<_> = xc.iter().map(|_| Conserved {density: 1., momentum_density: 0.5}).collect();
     let mut t = 0.0;
