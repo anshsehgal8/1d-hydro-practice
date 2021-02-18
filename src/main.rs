@@ -1,6 +1,6 @@
-use std::ops::{Add, Sub, Mul, Div};
 use std::fs;
 use std::io::Write;
+use derive_more::{Add,Sub, Mul, Div};
 
 
 
@@ -8,58 +8,21 @@ use std::io::Write;
 /**
  * Conserved quantities
  */
-#[derive(Copy,Clone)]
+#[derive(Copy,Clone, Add, Sub, Mul, Div)]
 struct Conserved{
     density: f64,
-    momentum_density: f64,
+    momentum: f64,
+    energy: f64,
 }
 
 
-
-
-// ============================================================================
-impl Add for Conserved {
-    type Output = Conserved;
-    fn add(self, a: Conserved) -> Conserved {
-        Conserved {
-            density: self.density + a.density,
-            momentum_density: self.momentum_density + a.momentum_density
-        }
-    }
+#[derive(Copy,Clone, Add, Sub, Mul, Div)]
+struct Primitive{
+    density: f64,
+    velocity: f64,
+    pressure: f64,
 }
 
-
-impl Sub for Conserved {
-    type Output = Conserved;
-    fn sub(self, a: Conserved) -> Conserved {
-        Conserved {
-            density: self.density - a.density,
-            momentum_density: self.momentum_density - a.momentum_density
-        }
-    }
-}
-
-
-impl Mul<f64> for Conserved {
-    type Output = Conserved;
-    fn mul(self, a: f64) -> Conserved {
-        Conserved {
-            density: self.density * a,
-            momentum_density: self.momentum_density * a
-        }
-    }
-}
-
-
-impl Div<f64> for Conserved {
-    type Output = Conserved;
-    fn div(self, a: f64) -> Conserved{
-        Conserved{
-            density: self.density / a,
-            momentum_density: self.momentum_density / a
-        }
-    }
-}
 
 
 
@@ -67,34 +30,62 @@ impl Div<f64> for Conserved {
 // ============================================================================
 impl Conserved {
 
-    fn velocity(self) -> f64 {
-        self.momentum_density / self.density
-    }
+	fn to_prim(self, gamma:f64) -> Primitive {
 
-    fn pressure(self, gamma:f64) -> f64 {
-        self.density.powf(gamma)
-    }
+		Primitive{
+			density: self.density,
+			velocity: self.momentum / self.density,
+			pressure: (gamma - 1.) * (self. energy - 0.5 * self.momentum.powi(2) / self.density)		
+		}
+	}
 
-    fn flux(self, gamma:f64) -> Conserved {
-        self * self.velocity() + Conserved { density: 0.0, momentum_density: self.pressure(gamma) }
-    }
 
-    fn sound_speed(self, gamma:f64) -> f64{
-        (gamma * self.density.powf(gamma - 1.0)).sqrt()
+    // fn flux(self, gamma:f64) -> Conserved {
+    //     self * self.velocity() + Conserved { density: 0.0, momentum: self.pressure(gamma) }
+    // }
+
+    // fn sound_speed(self, gamma:f64) -> f64{
+    //     (gamma * self.density.powf(gamma - 1.0)).sqrt()
+    // }
+}
+
+
+
+impl Primitive {
+
+	fn to_cons(self, gamma:f64) -> Conserved {
+
+		Conserved{
+			density: self.density,
+			momentum: self.density * self.velocity,
+			energy: self.pressure / (gamma - 1.) + 0.5 * self.density * self.velocity.powi(2)
+		}
+
+	}
+
+	fn flux(self, gamma:f64) -> Conserved {
+
+		self.to_cons(gamma) * self.velocity + Conserved{ density: 0., momentum: self.pressure, energy: self.pressure * self.velocity}
+
+	}
+
+	fn sound_speed(self, gamma:f64) -> f64{
+        (gamma * self.pressure / self.density).sqrt()
     }
 }
 
 
 
-
 // ============================================================================
 fn hll_flux(ul: Conserved, ur: Conserved, gamma: f64) -> Conserved {
-    let fl = ul.flux(gamma);
-    let fr = ur.flux(gamma);
-    let lambda_left_minus  = ul.velocity() - ul.sound_speed(gamma);
-    let lambda_left_plus   = ul.velocity() + ul.sound_speed(gamma);
-    let lambda_right_minus = ur.velocity() - ur.sound_speed(gamma);
-    let lambda_right_plus  = ur.velocity() + ur.sound_speed(gamma);
+	let pl = ul.to_prim(gamma);
+	let pr = ur.to_prim(gamma);
+    let fl = pl.flux(gamma);
+    let fr = pr.flux(gamma);
+    let lambda_left_minus  = pl.velocity - pl.sound_speed(gamma);
+    let lambda_left_plus   = pl.velocity + pl.sound_speed(gamma);
+    let lambda_right_minus = pr.velocity - pr.sound_speed(gamma);
+    let lambda_right_plus  = pr.velocity + pr.sound_speed(gamma);
     let alpha_plus  = ( lambda_left_plus) .max( lambda_right_plus). max(0.0);
     let alpha_minus = (-lambda_left_minus).max(-lambda_right_minus).max(0.0);
     ((fl * alpha_plus) + (fr * alpha_minus) - (ur - ul) * alpha_plus * alpha_minus) / (alpha_plus + alpha_minus)
@@ -107,7 +98,7 @@ fn hll_flux(ul: Conserved, ur: Conserved, gamma: f64) -> Conserved {
 fn next(u: Vec<Conserved>, dx: f64, dt: f64, gamma: f64) -> Vec<Conserved> {
 
     let n = u.len();
-    let mut u1 = vec![Conserved{density:0., momentum_density:0.}; n];
+    let mut u1 = vec![Conserved{density:0., momentum:0., energy:0.}; n];
 
     for i in 1..n-1 {
         let f_imh = hll_flux(u[i-1], u[i], gamma);
@@ -124,17 +115,19 @@ fn next(u: Vec<Conserved>, dx: f64, dt: f64, gamma: f64) -> Vec<Conserved> {
 
 
 // ============================================================================
-fn shocktube(x: f64, x_split: f64, rho_left: f64, rho_right: f64) -> Conserved {
+fn shocktube(x: f64, x_split: f64, rho_p_left: (f64,f64), rho_p_right: (f64,f64)) -> Primitive {
     if x < x_split {
-        Conserved {
-            density: rho_left,
-            momentum_density: 0.0
+        Primitive {
+            density: rho_p_left.0,
+            velocity: 0.0,
+            pressure: rho_p_left.1,
         }
     }
     else {
-        Conserved {
-            density: rho_right,
-            momentum_density: 0.0
+        Primitive {
+            density: rho_p_right.0,
+            velocity: 0.0,
+            pressure: rho_p_right.1,
         }
     }
 }
@@ -145,17 +138,16 @@ fn shocktube(x: f64, x_split: f64, rho_left: f64, rho_right: f64) -> Conserved {
 // ============================================================================
 fn main() {
 
-    let num_cells = 100;
-    let tfinal = 0.5;
+    let num_cells = 1000;
+    let tfinal = 0.25;
     let x_0 = -1.0;
     let x_f =  1.0;
     let dx = (x_f - x_0) / (num_cells as f64);
-    let dt = tfinal / 100.0; 
-    let gamma = 1.0;
+    let dt = tfinal / 1000.0; 
+    let gamma = 5. / 3.;
 
     let xc: Vec<_> = (0..num_cells).map(|i| x_0 + (i as f64 + 0.5) * dx).collect();
-    let mut u: Vec<_> = xc.iter().map(|&x| shocktube(x, 0.0, 1.0, 0.1)).collect();
-    //let mut u: Vec<_> = xc.iter().map(|_| Conserved {density: 1., momentum_density: 0.5}).collect();
+    let mut u: Vec<_> = xc.iter().map(|&x| shocktube(x, 0.0, (1.0, 1.0), (0.1, 0.125)).to_cons(gamma)).collect();
     let mut t = 0.0;
 
     while t < tfinal {
@@ -166,6 +158,7 @@ fn main() {
     let file = fs::File::create("solution.dat").unwrap();
 
     for (xc, u) in xc.iter().zip(u) {
-        writeln!(&file, "{:.6} {:.6} {:.6}", xc, u.density, u.velocity()).unwrap();
+    	let p = u.to_prim(gamma);
+        writeln!(&file, "{:.6} {:.6} {:.6} {:.6}", xc, p.density, p.velocity, p.pressure).unwrap();
     }
 }
