@@ -1,3 +1,5 @@
+mod hllc;
+
 use std::fs;
 use std::io::Write;
 use derive_more::{Add,Sub, Mul, Div};
@@ -9,18 +11,18 @@ use derive_more::{Add,Sub, Mul, Div};
  * Conserved quantities
  */
 #[derive(Copy,Clone, Add, Sub, Mul, Div)]
-struct Conserved{
-    density: f64,
-    momentum: f64,
-    energy: f64,
+pub struct Conserved{
+    pub density: f64,
+    pub momentum: f64,
+    pub energy: f64,
 }
 
 
 #[derive(Copy,Clone, Add, Sub, Mul, Div)]
-struct Primitive{
-    density: f64,
-    velocity: f64,
-    pressure: f64,
+pub struct Primitive{
+    pub density: f64,
+    pub velocity: f64,
+    pub pressure: f64,
 }
 
 
@@ -92,6 +94,24 @@ fn hll_flux(ul: Conserved, ur: Conserved, gamma: f64) -> Conserved {
 }
 
 
+fn hllc_flux(ul: Conserved, ur: Conserved, gamma: f64) -> Conserved {
+    use hllc::Riemann_HLLC_t;
+
+    let pl  = ul.to_prim(gamma);
+    let pr  = ur.to_prim(gamma);
+    let llm = pl.velocity - pl.sound_speed(gamma);
+    let llp = pl.velocity + pl.sound_speed(gamma);
+    let lrm = pr.velocity - pr.sound_speed(gamma);
+    let lrp = pr.velocity + pr.sound_speed(gamma);
+    let sl  = llm.min(lrm);
+    let sr  = llp.max(lrp);
+
+    Riemann_HLLC_t{pl: pl, pr: pr, sl: sl, sr: sr, gamma: gamma}.hllc_flux()
+}
+
+
+
+
 
 
 // ============================================================================
@@ -101,8 +121,8 @@ fn next(u: Vec<Conserved>, dx: f64, dt: f64, gamma: f64) -> Vec<Conserved> {
     let mut u1 = vec![Conserved{density:0., momentum:0., energy:0.}; n];
 
     for i in 1..n-1 {
-        let f_imh = hll_flux(u[i-1], u[i], gamma);
-        let f_iph = hll_flux(u[i], u[i+1], gamma);
+        let f_imh = hllc_flux(u[i-1], u[i], gamma);
+        let f_iph = hllc_flux(u[i], u[i+1], gamma);
         u1[i] = u[i] - (f_iph - f_imh) * dt / dx
     }
 
